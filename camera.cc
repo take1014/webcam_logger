@@ -1,5 +1,61 @@
 #include "camera.h"
 
+#include <opencv2/opencv.hpp>
+#include <fcntl.h>
+#include <linux/fb.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <cstring>
+#include <iostream>
+
+bool displayImageToFramebuffer(const cv::Mat& inputImg, const std::string& fbPath = "/dev/fb0") {
+    // フレームバッファを開く
+    int fbfd = open(fbPath.c_str(), O_RDWR);
+    if (fbfd < 0) {
+        perror("Failed to open framebuffer");
+        return false;
+    }
+
+    // フレームバッファ情報を取得
+    fb_var_screeninfo vinfo{};
+    fb_fix_screeninfo finfo{};
+    if (ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo) || ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo)) {
+        perror("Failed to get framebuffer info");
+        close(fbfd);
+        return false;
+    }
+
+    const int screen_width = vinfo.xres;
+    const int screen_height = vinfo.yres;
+    const int screen_size = finfo.smem_len;
+
+    // 入力画像を解像度にリサイズ
+    cv::Mat resized;
+    cv::resize(inputImg, resized, cv::Size(screen_width, screen_height));
+
+    // RGB565 に変換
+    cv::Mat rgba;
+    cv::cvtColor(resized, rgba, cv::COLOR_RGB2RGBA);
+
+    // フレームバッファをメモリにマップ
+    uint8_t* fbdata = (uint8_t*)mmap(0, screen_size, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
+    if ((intptr_t)fbdata == -1) {
+        perror("Failed to mmap framebuffer");
+        close(fbfd);
+        return false;
+    }
+
+    // フレームバッファへ書き込み
+    size_t image_size = rgba.total() * rgba.elemSize();
+    memcpy(fbdata, rgba.data, std::min(image_size, (size_t)screen_size));
+
+    // クリーンアップ
+    munmap(fbdata, screen_size);
+    close(fbfd);
+    return true;
+}
+
 // timestamp
 std::string getTimestampedFilename() {
     std::time_t t = std::time(nullptr);
@@ -58,6 +114,7 @@ void CameraThread::event_loop() {
     if (!frame_outer.empty()) {
       cv::flip(frame_outer, frame_outer, 0);
       writer_.write(frame_outer);
+      displayImageToFramebuffer(frame_outer);
     } else {
       std::cout << "do not capture a image" << std::endl;
     }
