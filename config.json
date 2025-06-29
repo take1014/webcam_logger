@@ -1,0 +1,8 @@
+{
+  "CAMERAD": {
+    "DEVICE": "/dev/video0",
+    "FPS": 20,
+    "IMG_WIDTH": 1280,
+    "IMG_HEIGHT": 720
+  }
+}
